@@ -6,6 +6,8 @@ import psycopg2
 import requests
 import sqlalchemy
 import gevent
+from nltk.stem.snowball import SnowballStemmer
+from sqlalchemy import any_
 
 e = os.environ
 
@@ -16,6 +18,7 @@ SCHEMA_WORD=e.get('SCHEMA','word_for_search')
 TABLE_TELEGRAM = e.get('TABLE_NAME','telegram.message')
 TABLE_COIN = e.get('TABLE_NAME','synonyms')
 TABLE_WORD = e.get('TABLE_NAME','word_for_search.words')
+TABLE_SYNONYM=e.get('TABLE_SYNONYM','telegram.synonyms')
 MAX_QUEUE_LENGTH = e.get('MAX_QUEUE_LENGTH', 10000) # Максимальное количество INSERT в одном запросе
 FALSE_VALUE = e.get('FALSE_VALUE', '') # Что отдавать в базу, если значение пустое
 
@@ -27,7 +30,7 @@ DB_NAME = e.get('DB_NAME', 'prosphero')
 DB_PASSWORD = e.get('DB_PASSWORD', '44iAipyAjHHxkwHgyAPrqPSR5')
 DB_HOST = e.get('DB_HOST', '185.230.142.61')
 DB_USER = e.get('DB_USER', 'externalanna')
-DB_PORT = e.get('DB_PORT', 'externalanna')
+DB_PORT = e.get('DB_PORT', '5432')
 
 class DB:
     def __init__(self):
@@ -44,7 +47,7 @@ class DB:
         return self.cursor
     def get_url(self):
         url = 'postgresql://{}:{}@{}:{}/{}'
-        url = url.format(DB_USER, DB_PASSWORD, DB_HOST,DB_PORT
+        self.url = url.format(DB_USER, DB_PASSWORD, DB_HOST,DB_PORT
                          , DB_NAME)
         return self.url
 
@@ -54,7 +57,8 @@ class DB:
             current_len = 0
             while current_len < stop_len:
                 try:
-                    conn = sqlalchemy.create_engine(self.get_url(), echo=True)
+                    url=self.get_url()
+                    conn = sqlalchemy.create_engine(url, echo=True)
                 except:
                     time.sleep(10)
                     print("Connect failed")
@@ -102,16 +106,30 @@ class Message():
     def __init__(self):
         self.message=[]
 
-    def get_message(self,date_start,date_end):
+    def get_message(self,date_start,date_end, foo):
         db=DB()
         con = DB.get_connect(DB)
         meta = sqlalchemy.MetaData(bind=con, reflect=True, schema=SCHEMA)
         telegram = meta.tables[TABLE_TELEGRAM]
+
         telegram_sql = telegram.select().with_only_columns(
             [telegram.c.message, telegram.c.id_message, telegram.c.name_chat, telegram.c.date]).where(
             (telegram.c.date > date_start) & (telegram.c.date < date_end) & (
             sqlalchemy.func.lower(telegram.c.message).like(any_(foo))))
         db = con.execute(telegram_sql)
+        for item in db:
+            message_dict=dict(
+                message=item._row[0][0],
+                id_message=item._row[0][1],
+                name_chat=item._row[0][2],
+                date=item._row[0][3]
+            )
+            self.message.append(message_dict)
+
+        return  self.message
+
+
+
 
 
 class Word:
@@ -123,11 +141,11 @@ class Word:
 
     def get_word(self):
         db=DB()
-        con=DB.get_connect(DB)
+        con=DB.get_connect(db)
         meta=sqlalchemy.MetaData(bind=con, reflect=True, schema=SCHEMA_WORD)
         word_table = meta.tables[TABLE_WORD]
         cursor=word_table.select()
-        db = con.execute(word_table)
+        db = con.execute(cursor)
         for item in db:
             assessment = dict(
                 name=item._row[0].lower(),
@@ -143,10 +161,60 @@ class Word:
 
 class Coin():
     def __init__(self):
-        self.coin=[]
+        wb=Word()
+        self.coin=self.get_data()
         self.task=[]
+        self.stop_word=wb.stop_word
+        self.word=wb.get_word()
 
-    def get_data(self, item):
+
+
+    def get_data(self):
+        db=DB()
+        coin=[]
+        con = DB.get_connect(db)
+        meta = sqlalchemy.MetaData(bind=con, reflect=True, schema=SCHEMA)
+        word_table = meta.tables[TABLE_SYNONYM]
+        synonym=word_table.select()
+        db=con.execute(synonym)
+        for item in db:
+            coin_temp = []
+            sinonium = []
+            foo = []
+            if type(item._row) == 'tuple':
+                temp_word=item._row[0][3].split(',')
+                for temp_i in temp_word:
+
+                    sinonium.append(temp_i)
+                    foo.append('%'+temp_i+'%')
+
+                coin_data = dict(
+                    symbol=item._row[0][0],
+                    sinonium=sinonium,
+                    foo=foo
+                )
+            else:
+
+                temp_word = item._row[3].split(',')
+                for temp_i in temp_word:
+                    sinonium.append(temp_i)
+                    foo.append('%' + temp_i + '%')
+
+                coin_data = dict(
+                    symbol=item._row[0],
+                    sinonium=sinonium,
+                    foo=foo
+                )
+
+            coin.append(coin_data)
+        db.close()
+        return coin
+
+    def get_coin_foo(self, symbol):
+        symbol=[i for i in self.coin if i[symbol]==symbol]
+        return  symbol
+
+    def get_symbol(self, item):
         for i in item:
             coin_temp = []
             sinonium = []
@@ -178,6 +246,7 @@ class Coin():
             self.coin.append(coin_data)
         return self.coin
 
+    '''
     def get_coin(self, coin_start):
         db = DB()
         con = DB.get_connect(DB)
@@ -204,25 +273,128 @@ class Coin():
             self.coin.append(item)
         db.close()
         return self.coin
-
+    '''
     def get_task(self,date_start, date_end,coin_start):
-        self.get_coin(coin_start)
+
+        word=Word.get_word()
         for item in self.coin:
             item_current = dict(
                 date_start=date_start,
                 date_end=date_end,
-                symbol=item
+                symbol=item,
+                key_word=self.word,
+                stop_word=self.stop_word
             )
             self.task.append(item_current)
         return self
 
+def get_tonal_date(args):
+    print('start_write - ', str(datetime.now()))
+    coin=Coin().get_data()
+    message=Message.get_message(args['date_start'],args['date_end'],coin.get_coin_foo(args['symbol']))
+    '''
+    for item in coin:
+    message=Message().get_message(args[])
+    stemmer = SnowballStemmer("english")
+    word_analitics=get_word_analitics(url)
+    telegram = meta.tables['telegram.message']
+    telegram_sql = telegram.select().with_only_columns(
+        [telegram.c.message, telegram.c.id_message, telegram.c.name_chat, telegram.c.date]).where(
+        (telegram.c.date > args['date_start']) & (telegram.c.date < args['date_end']) & (
+            sqlalchemy.func.lower(telegram.c.message).like(any_(foo))))
+    db = con.execute(telegram_sql)
 
+    for item in db:
+        data = word_tokenize(item._row[0].lower())
+        search_temp = [i for i in w_coin if i in data]
+        if search_temp == None:
+            continue
 
+        flag_sentence = False
+        temp_sentence = item._row[0].split('.')
+        for sentence in temp_sentence:
 
+            data = word_tokenize(sentence.lower())
+            search_word=[i for i in w_coin if i in data]
+            if len(search_word) == 0:
+                continue
+
+            telegram_word = meta.tables['telegram.message_tonal_tf_idf']
+            telegram_sql = telegram_word.select().where(
+                (telegram_word.c.id == item._row[1]) & (telegram_word.c.name_chat == item._row[2]))
+            db = con.execute(telegram_sql)
+            if db.rowcount > 0 or len(data) == 0:
+                continue
+
+            singles = [stemmer.stem(plural) for plural in data]
+            singles = [i.lower() for i in singles if i not in punctuation]
+            search = [i for i in word_analitics if i['name'] in singles]
+
+            if len(search) == 0:
+                data_insert = dict(
+                    id=item._row[1],
+                    symbol=args['symbol'],
+                    title=args['title'],
+                    key_coin=search_word[0],
+                    keyword='',
+                    tonal=0,
+                    ball=0,
+                    name_chat=item._row[2],
+                    processing_dttm=item._row[3]
+                )
+                telegram_sql = telegram_word.insert(data_insert)
+                db = con.execute(telegram_sql)
+                continue
+
+            rating = 0
+            keyword = ''
+            for i in search:
+                rating += i['ball']
+                keyword += i['name'] + ','
+            keyword = keyword[0:len(keyword) - 1]
+            if rating >= 1:
+                index = singles.index(search[0]['name'])
+                temp = singles[0:index]
+                temp_negative = [i for i in temp if i in negativ]
+                if len(temp_negative) > 0:
+                    tonal = -1
+                    ball = (rating) * (-1)
+
+                else:
+                    tonal = 1
+                    ball = rating
+            elif rating <= -1:
+                index = singles.index(search[0]['name'])
+                temp = singles[0:index]
+                temp_negative = [i for i in temp if i in negativ]
+                if len(temp_negative) > 0:
+                    tonal = 1
+                    ball = (rating) * (-1)
+                else:
+                    tonal = -1
+                    ball = rating
+            else:
+                tonal = 0
+                rating = 0
+            data_insert = dict(
+                id=item._row[1],
+                symbol=args['symbol'],
+                keyword=keyword,
+                title=args['title'],
+                key_coin=search_word[0],
+                tonal=tonal,
+                ball=rating,
+                name_chat=item._row[2],
+                processing_dttm=item._row[3]
+            )
+            telegram_sql = telegram_word.insert(data_insert)
+db = con.execute(telegram_sql)
+'''
 
 def return_task(coin_start,date_delta):
     coin=Coin()
     task=coin.get_task(date_delta['date_start'], date_delta['date_end'], coin_start)
+
 
 def get_datetime(date_start,date_end):
     date_start = datetime.strptime(date_start, '%Y-%m-%d %H:%M:%S')
@@ -235,7 +407,7 @@ def get_datetime(date_start,date_end):
 
 def insert_tonal_statistic():
     coin_start=0
-    date_delta=get_datetime()
+    date_delta=get_datetime('2018-11-01 00:00:00','2018-10-01 00:00:00')
     while coin_start<100:
         task=return_task(coin_start,date_delta)
         threads = [gevent.spawn(get_tonal_date, i) for i in task.task]
@@ -243,3 +415,4 @@ def insert_tonal_statistic():
         coin_start += 5
 
 
+insert_tonal_statistic()

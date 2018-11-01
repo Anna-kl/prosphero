@@ -1,14 +1,14 @@
+import sqlalchemy
+import gevent
+import re
+import os
 from datetime import datetime, timedelta
 from string import punctuation
 from sqlalchemy import any_
 from nltk.tokenize import sent_tokenize, word_tokenize
-from sqlalchemy.ext.declarative import declarative_base
-import os
 from nltk.stem.snowball import SnowballStemmer
-import sqlalchemy
-import gevent
 
-import re
+
 
 class Settings(object):
     def get_settings(self):
@@ -128,9 +128,7 @@ def get_tonal_date(args):
     con = sqlalchemy.create_engine(url, echo=True)
     meta = sqlalchemy.MetaData(bind=con, reflect=True, schema='telegram')
     users_table = meta.tables['telegram.synonyms']
-    date_start=args['date_start']
-    date_end_temp=date_start+timedelta(days=1)
-    flag=True
+
     w_coin=[]
     foo=[]
     word_coin=get_coin_single(args['symbol'],url)
@@ -147,19 +145,18 @@ def get_tonal_date(args):
     stemmer = SnowballStemmer("english")
     word_analitics=get_word_analitics(url)
 
-    while flag:
-        if date_end_temp>args['date_end']:
-            print('end - ',datetime.now())
-            break
-        flag_sentence=False
-        telegram = meta.tables['telegram.message']
-        telegram_sql = telegram.select().with_only_columns([telegram.c.message,telegram.c.id_message,telegram.c.name_chat,telegram.c.date]).where(
-            (telegram.c.date > date_start) & (telegram.c.date < date_end_temp)&(sqlalchemy.func.lower(telegram.c.message).like(any_(foo))))
-        db = con.execute(telegram_sql)
-        positively = []
-        negative = []
+    telegram = meta.tables['telegram.message']
+    telegram_sql = telegram.select().with_only_columns([telegram.c.message,telegram.c.id_message,telegram.c.name_chat,telegram.c.date]).where(
+            (telegram.c.date > args['date_start']) & (telegram.c.date < args['date_end'])&(sqlalchemy.func.lower(telegram.c.message).like(any_(foo))))
+    db = con.execute(telegram_sql)
 
-        for item in db:
+
+    for item in db:
+            data = word_tokenize(item._row[0].lower())
+            search_temp=[i for i in w_coin if i in data]
+            if search_temp==None:
+                continue
+
             flag_sentence=False
             temp_sentence=item._row[0].split('.')
             for sentence in temp_sentence:
@@ -245,8 +242,7 @@ def get_tonal_date(args):
                 )
                 telegram_sql = telegram_word.insert(data_insert)
                 db = con.execute(telegram_sql)
-        date_start=date_start+timedelta(days=1)
-        date_end_temp=date_start+timedelta(days=1)
+
 
 def get_tonal_list(date_start, date_end,symbol):
     print('start_write - ', str(datetime.now()))
@@ -497,10 +493,8 @@ def get_tonal(date_start, date_end,symbol):
             telegram_sql = telegram_word.insert(data_insert)
             db = con.execute(telegram_sql)
 
-
 def asynchronous():
     last_date=datetime.now()
-
     date_end= datetime.strptime(str(last_date.year)+'-'+str(last_date.month)+'-'+str(last_date.day)+' '+str(last_date.hour)+':00:00' , '%Y-%m-%d %H:%M:%S')
     date_start=date_end-timedelta(hours=8)
     setting = Settings()

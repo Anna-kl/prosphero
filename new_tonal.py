@@ -342,9 +342,9 @@ def get_datetime(date_start,date_end):
     )
     return time_delta
 
-def insert_tonal_statistic():
+def insert_tonal_statistic(date_start,date_end):
     coin_start=0
-    date_delta=get_datetime('2018-10-01 00:00:00','2018-11-01 00:00:00'
+    date_delta=get_datetime(date_start,date_end
                         )
 
     delta=5
@@ -465,4 +465,4 @@ def insert_in_DB(telegram_sql):
     db.connect.execute(cursor)
 
 
-insert_tonal_statistic()
+insert_tonal_statistic('2018-10-01 00:00:00','2018-11-01 00:00:00')

@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta
 from string import punctuation
 from sqlalchemy import any_
+import nltk
 from nltk.tokenize import sent_tokenize, word_tokenize
-from sqlalchemy.ext.declarative import declarative_base
+from langdetect import detect
 import os
 from nltk.stem.snowball import SnowballStemmer
 import sqlalchemy
-import gevent
 from nltk.corpus import stopwords
 
 import re
@@ -160,8 +160,13 @@ def get_tonal_date(args):
         db = con.execute(telegram_sql)
         positively = []
         negative = []
-
+        data_word=[]
         for item in db:
+            try:
+                if detect(item._row[0])!='en':
+                    continue
+            except:
+                continue
             search_word = [i for i in w_coin if re.search(i,item._row[0].lower())]
             data = word_tokenize(item._row[0].lower())
 
@@ -180,8 +185,14 @@ def get_tonal_date(args):
                         start_search=0
                     if end_search>len(data):
                         end_search=len(data)
+
                     vector_word=data[start_search:end_search]
-                    print(vector_word)
+                for j in vector_word:
+                    data_word.append(j)
+                print(vector_word)
+        fd=nltk.FreqDist(data_word)
+        word_coin=fd.most_common()
+        fd.plot(150, cumulative=False)
 
 
 

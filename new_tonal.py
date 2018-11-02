@@ -1,15 +1,16 @@
 import json
 import os
 import time
-from datetime import datetime
 import psycopg2
 from string import punctuation
 import requests
 import sqlalchemy
 import gevent
+from string import punctuation
 from nltk.stem.snowball import SnowballStemmer
 from sqlalchemy import any_
 from nltk.tokenize import sent_tokenize, word_tokenize
+from datetime import datetime
 
 e = os.environ
 
@@ -351,13 +352,14 @@ def insert_tonal_statistic(date_start,date_end):
     while coin_start<100:
 
         task=return_task(coin_start,date_delta, delta, coin.coin)
+        '''
         for i in task:
             get_tonal_date(i)
         '''
         threads = [gevent.spawn(get_tonal_date, i) for i in task]
         gevent.joinall(threads)
-        '''
-        coin_start += 5
+        
+        coin_start += delta
 
 def get_rating(search, singles):
     rating = 0

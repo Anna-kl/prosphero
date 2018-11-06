@@ -72,8 +72,8 @@ def get_coin(url):
     db = con.execute(word_table)
 
     for item in db:
-        if type(item._row)=='tuple':
-            word=item._row[0].split(',').lower()
+
+            word=item._row[0].lower().split(',')
             for i in word:
                 word_coin.append(i)
 
@@ -180,7 +180,7 @@ def get_tonal_date(args):
                     singles = [stemmer.stem(plural) for plural in vector_word]
                     for j in singles:
                         data_word.append(j)
-        print(vector_word)
+                    print(vector_word)
     fd=nltk.FreqDist(data_word)
     word_coin=fd.most_common()
     fd.plot(150, cumulative=False)

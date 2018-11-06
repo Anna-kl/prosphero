@@ -68,15 +68,16 @@ def get_coin(url):
     con = sqlalchemy.create_engine(url, echo=True)
     meta = sqlalchemy.MetaData(bind=con, reflect=True, schema='telegram')
     word_table = meta.tables['telegram.synonyms']
-    word_table = word_table.select()
+    word_table = word_table.select().with_only_columns([word_table.c.synonyms])
     db = con.execute(word_table)
+
     for item in db:
-        assessment = dict(
-            symbol=item._row[0].lower(),
-            full_name=item._row[1].lower,
-            synonyms=item._row[3]
-        )
-        word_coin.append(assessment)
+        if type(item._row)=='tuple':
+            word=item._row[0].split(',').lower()
+            for i in word:
+                word_coin.append(i)
+
+
     return word_coin
 
 def get_coin_single(symbol,url):
@@ -147,34 +148,22 @@ def get_tonal_date(args):
    ## w_coin.append(word_coin['full_name'])
    ## foo.append('%' + word_coin['full_name'] + '%')
     stemmer = SnowballStemmer("english")
-    word_analitics=get_word_analitics(url)
+    word_analitics = get_word_analitics(url)
+    telegram = meta.tables['telegram.message']
+    telegram_sql = telegram.select().with_only_columns(
+        [telegram.c.message, telegram.c.id_message, telegram.c.name_chat, telegram.c.date]).where(
+        (telegram.c.date > args['date_start']) & (telegram.c.date < args['date_end']) & (
+            sqlalchemy.func.lower(telegram.c.message).like(any_(foo))))
+    db = con.execute(telegram_sql)
+    data_word=[]
+    coin_word=get_coin(url)
+    for item in db:
+        data = word_tokenize(item._row[0].lower())
+        search_temp = [i for i in w_coin if i in data]
+        if search_temp == None:
+            continue
 
-    while flag:
-        if date_end_temp>args['date_end']:
-            print('end - ',datetime.now())
-            break
-        flag_sentence=False
-        telegram = meta.tables['telegram.message']
-        telegram_sql = telegram.select().with_only_columns([telegram.c.message,telegram.c.id_message,telegram.c.name_chat,telegram.c.date]).where(
-            (telegram.c.date > date_start) & (telegram.c.date < date_end_temp)&(sqlalchemy.func.lower(telegram.c.message).like(any_(foo))))
-        db = con.execute(telegram_sql)
-        positively = []
-        negative = []
-        data_word=[]
-        for item in db:
-            try:
-                if detect(item._row[0])!='en':
-                    continue
-            except:
-                continue
-            search_word = [i for i in w_coin if re.search(i,item._row[0].lower())]
-            data = word_tokenize(item._row[0].lower())
-
-            search_word=[i for i in search_word if i in data]
-            if search_word:
-
-
-                for coin in search_word:
+        for coin in search_temp:
                     data=[i for i in data if i not in nltk_word]
                     data = [i for i in data if i not in punctuation]
                     data = [i for i in data if re.search('\w',i)]
@@ -187,19 +176,16 @@ def get_tonal_date(args):
                         end_search=len(data)
 
                     vector_word=data[start_search:end_search]
-                for j in vector_word:
-                    data_word.append(j)
-                print(vector_word)
-        fd=nltk.FreqDist(data_word)
-        word_coin=fd.most_common()
-        fd.plot(150, cumulative=False)
+                    vector_word=[i for i in vector_word if search_temp[0]!=i]
+                    singles = [stemmer.stem(plural) for plural in vector_word]
+                    for j in singles:
+                        data_word.append(j)
+        print(vector_word)
+    fd=nltk.FreqDist(data_word)
+    word_coin=fd.most_common()
+    fd.plot(150, cumulative=False)
 
 
-
-
-
-        date_start=date_start+timedelta(days=1)
-        date_end_temp=date_start+timedelta(days=1)
 
 def get_tonal_list(date_start, date_end,symbol):
     print('start_write - ', str(datetime.now()))
@@ -492,7 +478,7 @@ def asynchronous():
 
 def asynchronous_date():
     date_start = datetime.strptime('2018-06-01 00:00:00', '%Y-%m-%d %H:%M:%S')
-    date_end = datetime.strptime('2018-08-01 00:00:00', '%Y-%m-%d %H:%M:%S')
+    date_end = datetime.strptime('2018-11-01 00:00:00', '%Y-%m-%d %H:%M:%S')
     setting = Settings()
 
     url = 'postgresql://{}:{}@{}:{}/{}'
@@ -504,7 +490,7 @@ def asynchronous_date():
     meta = sqlalchemy.MetaData(bind=con, reflect=True, schema='telegram')
     users_table = meta.tables['telegram.synonyms']
 
-    cursor=users_table.select().with_only_columns([users_table.c.symbol]).where((users_table.c.rank_coin>0)&(users_table.c.rank_coin>10))
+    cursor=users_table.select().with_only_columns([users_table.c.symbol]).where((users_table.c.rank_coin>0)&(users_table.c.rank_coin<3))
     db = con.execute(cursor)
 
    ## list_coin=['eth','btc']

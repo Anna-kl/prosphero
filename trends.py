@@ -1,19 +1,13 @@
-from pytrends.request import TrendReq
+
 import sqlalchemy
 import datetime
-import pandas as pd
+
 import random
 import pymysql.cursors
 from sqlalchemy import desc
 import function_trends
 
-url = 'postgresql://postgres:2537300@localhost:5432/postgres'
 
-
-con = sqlalchemy.create_engine(url,echo=True)
-meta = sqlalchemy.MetaData(bind=con, reflect=True, schema='public')
-
-currency=meta.tables['public.currency_normalize']
 
 
 
@@ -56,5 +50,4 @@ def update():
             if function_trends.check_currency(item['source_id'].lower()):
                 function_trends.get_update_data(item['source_id'].lower())
 
-
-get_all_currency()
+function_trends.get_cites_dttm_btc('bitcoin','2017-01-01 00:00:00','2018-11-11 00:00:00')

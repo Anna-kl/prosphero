@@ -1,20 +1,48 @@
 from pytrends.request import TrendReq
 import sqlalchemy
 import datetime
-import pandas as pd
+import pandas  as pd
 import random
+import numpy
 import pymysql.cursors
 from sqlalchemy import desc
+import os
 
-url = 'postgresql://postgres:2537300@localhost:5432/postgres'
-
-
-con = sqlalchemy.create_engine(url,echo=True)
-meta = sqlalchemy.MetaData(bind=con, reflect=True, schema='public')
-
-currency=meta.tables['public.currency_normalize']
+class DB:
+    def __init__(self):
+        self.con=self.get_param_for_db()
 
 
+    def get_param_for_db(self):
+        url = 'postgresql://{}:{}@{}:5432/{}'
+        with open(os.getcwd()+'\settings.txt', 'r') as file:
+            data=file.read()
+            data=data.split('\n')
+            setting = {}
+            setting['host'] = data[0].replace('host:', '').replace(' ', '')
+            setting['login'] = data[1].replace('login:', '').replace(' ', '')
+            setting['password'] = data[2].replace('password:', '').replace(' ', '')
+            url=url.format(setting['login'],setting['password'],setting['host'],'prosphero')
+            con = sqlalchemy.create_engine(url, echo=True)
+
+            return con
+    def return_connection(self):
+        return self.con
+
+    def insert(self, mean_d,name_currency,d_currency,temp_k,on_currency ):
+        insert = dict(
+            currency=name_currency,
+            not_cited=d_currency,
+            cited=mean_d,
+            dttm=temp_k,
+            on_currency=on_currency
+        )
+        cur_insert = currency.insert(insert)
+        self.con.execute(cur_insert)
+
+DB_postgres=DB()
+meta = sqlalchemy.MetaData(bind=DB_postgres.con, reflect=True, schema='google')
+currency = meta.tables['google.currency_normalize']
 
 def get_currency_name():
     result=[]
@@ -43,7 +71,6 @@ def get_currency_name():
 def get_cites(name_currency):
     df1=get_dataframe_from_db()
     pytrend = TrendReq()
-
     to_list=df1.to_dict()
     for item_name, value in to_list.items():
         pytrend.build_payload(kw_list=[item_name, name_currency], timeframe='today 5-y')
@@ -63,7 +90,7 @@ def get_cites(name_currency):
             continue
         d=get_d_btc.to_dict()
         table_currency=currency.select().with_only_columns([currency.c.dttm,currency.c.cited]).where(currency.c.currency==item_name)
-        db = con.execute(table_currency)
+        db = DB_postgres.execute(table_currency)
         result_db={}
         for item in db:
             result_db[item[0]]=item[1]
@@ -78,16 +105,20 @@ def get_cites(name_currency):
             mean_d=(d_currency[k]*result_db[k])/d[k]
             for i in range(0,7):
                 temp_k=k+datetime.timedelta(days=i)
-                insert=dict(
-                    currency=name_currency,
-                    not_cited=d_currency[k],
-                    cited=mean_d,
-                    dttm=temp_k,
-                    on_currency=item_name
-                )
-                cur_insert=currency.insert(insert)
-                db=con.execute(cur_insert)
+                DB_postgres.insert(mean_d,name_currency,d_currency[k],temp_k,item_name)
+
         break
+
+def get_data_from_db(name_currency):
+    result={}
+    table_currency = currency.select().with_only_columns([currency.c.dttm, currency.c.cited]).where(
+        currency.c.currency == name_currency)
+    db = DB.con.execute(table_currency)
+    result_db = {}
+    for item in db:
+        result_db[item[0]] = item[1]
+    return result
+
 
 def get_cites_from_dttm(name_currency,dttm):
     df1=get_dataframe_from_db()
@@ -111,11 +142,8 @@ def get_cites_from_dttm(name_currency,dttm):
         if count>15:
             continue
         d=get_d_btc.to_dict()
-        table_currency=currency.select().with_only_columns([currency.c.dttm,currency.c.cited]).where(currency.c.currency==item_name)
-        db = con.execute(table_currency)
-        result_db={}
-        for item in db:
-            result_db[item[0]]=item[1]
+
+        result_db=get_data_from_db(name_currency)
         data_start = dttm
         old_data=datetime.datetime.now()-datetime.timedelta(days=93)
 
@@ -127,15 +155,7 @@ def get_cites_from_dttm(name_currency,dttm):
             mean_d=(d_currency[k]*result_db[k])/d[k]
             for i in range(0,7):
                 temp_k=k+datetime.timedelta(days=i)
-                insert=dict(
-                    currency=name_currency,
-                    not_cited=d_currency[k],
-                    cited=mean_d,
-                    dttm=temp_k,
-                    on_currency=item_name
-                )
-                cur_insert=currency.insert(insert)
-                con.execute(cur_insert)
+                DB_postgres.insert(mean_d, name_currency, d_currency[k], temp_k, item_name)
         break
 
 def get_on_currency(name_currency):
@@ -164,66 +184,23 @@ def get_not_cited(name_currency, dttm):
            return get_currency[k]
 
     return -1
-def get_not_cited_massive(name_currency, dttm):
-    df1 = get_dataframe_from_db()
-    pytrend = TrendReq()
-    df = get_dataframe_from_db()
-    to_list = df1.to_dict()
-    item_name=get_on_currency(name_currency)
-    pytrend.build_payload(kw_list=[name_currency], timeframe='today 5-y')
-    interest_over_time_df = pytrend.interest_over_time()
-    get_d_btc = interest_over_time_df[name_currency]
-    get_currency = interest_over_time_df[name_currency]
-    d_currency = get_currency.to_dict()
-    d = get_d_btc.to_dict()
-    result={}
 
-    for k, n in d.items():
-        if k>=dttm:
-            for j in range(0,7):
-                temp_dttm=dttm+datetime.timedelta(days=j)
-                result[temp_dttm]=n
-
-    return result
 
 def get_cites_dttm_btc(name_currency, dttm_start, dttm_end):
-        df1 = get_dataframe_from_db()
         pytrend = TrendReq()
-        df = get_dataframe_from_db()
-        to_list = df1.to_dict()
-        for item_name, value in to_list.items():
-            pytrend.build_payload(kw_list=[item_name, name_currency], timeframe='today 5-y')
-            interest_over_time_df = pytrend.interest_over_time()
 
-            get_d_btc = interest_over_time_df[item_name]
-            get_currency = interest_over_time_df[name_currency]
-            d_currency = get_currency.to_dict()
-            flag = True
-            count = 0
+        pytrend.build_payload(kw_list=[ 'bitcoin'], timeframe='today 5-y')
+        interest_over_time_df = pytrend.interest_over_time()
 
-            for i in range(0, 20):
-                key = random.choice(list(d_currency.keys()))
-                if d_currency[key] == 0:
-                    flag = False
-                    count += 1
+        get_d_btc = interest_over_time_df['bitcoin']
+        get_currency = interest_over_time_df[name_currency]
+        d_currency = get_currency.to_dict()
 
-            if count > 3:
-                continue
-            d = get_d_btc.to_dict()
-            table_currency = currency.select().with_only_columns([currency.c.dttm, currency.c.cited]).where(
-                currency.c.currency == item_name)
-            db = con.execute(table_currency)
-            result_db = {}
-            for item in db:
-                result_db[item[0]] = item[1]
+        d = get_d_btc.to_dict()
 
-            main_st = 1340
-            old_data = datetime.datetime.now() - datetime.timedelta(days=93)
-            data_start = datetime.datetime.strptime('2017-01-01 00:00:00', '%Y-%m-%d %H:%M:%S')
-            for k, n in d.items():
+        for k, n in d.items():
 
-                if d_currency[k] == 0:
-                    d_currency[k] = 0.5
+
                 if k >= dttm_start and k <= dttm_end:
 
                     mean_d = (d_currency[k] * 1340)/ 100
@@ -232,15 +209,7 @@ def get_cites_dttm_btc(name_currency, dttm_start, dttm_end):
                         temp_k = k + datetime.timedelta(days=i)
                         if temp_k>dttm_end:
                             break
-                        insert = dict(
-                            currency=name_currency,
-                            not_cited=d_currency[k],
-                            cited=mean_d,
-                            dttm=temp_k,
-                            on_currency=name_currency
-                        )
-                        cur_insert = currency.insert(insert)
-                        db = con.execute(cur_insert)
+                            DB_postgres.insert(mean_d, name_currency, d_currency[k], temp_k, name_currency)
 
 
 def get_dataframe_from_db():
@@ -249,7 +218,7 @@ def get_dataframe_from_db():
     max=10000
     for item in name_currency:
         table_currency = currency.select().with_only_columns([currency.c.cited]).where(currency.c.currency==item)
-        db = con.execute(table_currency)
+        db=DB.con.execute(table_currency)
         list_currency=list_from_db(db)
 
         data[item]=list_currency
@@ -265,7 +234,7 @@ def get_dataframe_from_db():
 
 def get_last_dttm(name_currency):
     cursor=currency.select().with_only_columns([currency.c.dttm]).where(currency.c.currency==name_currency).order_by(desc(currency.c.dttm))
-    db=con.execute(cursor)
+    db=DB.con.execute(cursor)
     for item in db:
         last_dttm=item._row[0]
         break
@@ -274,8 +243,6 @@ def get_last_dttm(name_currency):
 def get_coef_btc(dttm):
     df1 = get_dataframe_from_db()
     pytrend = TrendReq()
-    df = get_dataframe_from_db()
-    to_list = df1.to_dict()
 
     pytrend.build_payload(kw_list=['bitcoin'], timeframe='today 5-y')
     interest_over_time_df = pytrend.interest_over_time()
@@ -287,7 +254,7 @@ def get_coef_btc(dttm):
     d = get_d_btc.to_dict()
     table_currency = currency.select().with_only_columns([currency.c.dttm, currency.c.cited]).where(
         currency.c.currency == 'bitcoin')
-    db = con.execute(table_currency)
+    DB.con.execute(table_currency)
 
     for k, n in d.items():
         if dttm >= k and dttm < k + datetime.timedelta(days=7):
@@ -297,8 +264,7 @@ def get_coef_btc(dttm):
 def get_last_90days_btc(name_currency,dttm):
     df1 = get_dataframe_from_db()
     pytrend = TrendReq()
-    df = get_dataframe_from_db()
-    to_list = df1.to_dict()
+
 
     pytrend.build_payload(kw_list=[name_currency], timeframe='today 3-m')
     interest_over_time_df = pytrend.interest_over_time()
@@ -308,13 +274,7 @@ def get_last_90days_btc(name_currency,dttm):
     d_currency = get_currency.to_dict()
 
     d = get_d_btc.to_dict()
-    table_currency = currency.select().with_only_columns([currency.c.dttm, currency.c.cited]).where(
-            currency.c.currency == name_currency)
-    db = con.execute(table_currency)
-    result_db = {}
-    for item in db:
-        if item._row[0]>=dttm:
-            result_db[item[0]] = item[1]
+
 
     not_cited=get_coef_btc(dttm)
     for k, n in d.items():
@@ -326,19 +286,7 @@ def get_last_90days_btc(name_currency,dttm):
     for k, n in d.items():
                 if k >= dttm:
                     mean_d=d_currency[k]*coef
-
-
-
-                    insert = dict(
-                        currency=name_currency,
-                        not_cited=d_currency[k],
-                        cited=mean_d,
-                        dttm=k,
-                        on_currency=name_currency
-                    )
-                cur_insert = currency.insert(insert)
-                db = con.execute(cur_insert)
-
+                    DB_postgres.insert(mean_d, name_currency, d_currency[k], k, name_currency)
 
 
 def get_last_data_btc(name_currency):
@@ -346,26 +294,17 @@ def get_last_data_btc(name_currency):
     new_data=datetime.datetime.strptime(str(new_data.year)+'-'+str(new_data.month)+'-'+str(new_data.day)+' 00:00:00', '%Y-%m-%d %H:%M:%S')
     old_data = new_data - datetime.timedelta(days=93)
     last_dttm=get_last_dttm('bitcoin')
-    on_currency=get_on_currency(name_currency)
-    not_cited=get_not_cited(name_currency,'2018-01-10 00:00:00')
+
     if last_dttm<old_data:
         get_cites_dttm_btc(name_currency, last_dttm,old_data)
     else:
         get_last_90days_btc(name_currency,last_dttm)
 
-def aligment_to_date(name_currency):
-    table_currency = currency.select().with_only_columns([currency.c.dttm]).where(currency.c.currency == name_currency).order_by(desc(currency.c.dttm))
-    db = con.execute(table_currency)
-    for item in db:
-        last_data=item._row[0]
-        break
-    old_data = datetime.datetime.now() - datetime.timedelta(days=93)
+
 
 def get_cites_dttm(name_currency, last_dttm, old_data):
-    df1 = get_dataframe_from_db()
+
     pytrend = TrendReq()
-    df = get_dataframe_from_db()
-    to_list = df1.to_dict()
     on_currency=get_on_currency(name_currency)
 
     pytrend.build_payload(kw_list=[on_currency, name_currency], timeframe='today 5-y')
@@ -375,13 +314,7 @@ def get_cites_dttm(name_currency, last_dttm, old_data):
     get_currency = interest_over_time_df[name_currency]
     d_currency = get_currency.to_dict()
     d = get_d_btc.to_dict()
-    table_currency = currency.select().with_only_columns([currency.c.dttm, currency.c.cited]).where(
-            currency.c.currency == on_currency)
-    db = con.execute(table_currency)
-    result_db = {}
-    for item in db:
-        if item._row[0]>=last_dttm:
-            result_db[item._row[0]]=item._row[1]
+    result_db=get_data_from_db(name_currency)
     for k, n in d.items():
 
             if d_currency[k] == 0:
@@ -394,31 +327,28 @@ def get_cites_dttm(name_currency, last_dttm, old_data):
                     temp_k = k + datetime.timedelta(days=i)
                     if temp_k > old_data:
                         break
-                    insert = dict(
-                        currency=name_currency,
-                        not_cited=d_currency[k],
-                        cited=mean_d,
-                        dttm=temp_k,
-                        on_currency=name_currency
-                    )
-                    cur_insert = currency.insert(insert)
-                    db = con.execute(cur_insert)
+                    DB_postgres.insert(mean_d, name_currency, d_currency[k], temp_k, name_currency)
 
-def get_update_data(name_currency,dttm):
+
+def get_interest( name_currency, param):
     pytrend = TrendReq()
     on_currency = get_on_currency(name_currency)
-    pytrend.build_payload(kw_list=[on_currency, name_currency], timeframe='now 7-d')
+    pytrend.build_payload(kw_list=[on_currency, name_currency], timeframe=param)
     interest_over_time_df = pytrend.interest_over_time()
+    return interest_over_time_df
+
+def get_update_data(name_currency,dttm):
+    on_currency = get_on_currency(name_currency)
+    interest_over_time_df = get_interest(name_currency,'now 7-d')
 
     get_d_btc = interest_over_time_df[on_currency]
     get_currency = interest_over_time_df[name_currency]
     d_currency = get_currency.to_dict()
     d = get_d_btc.to_dict()
     table_currency = currency.select().with_only_columns(
-        [currency.c.dttm, currency.c.cited, currency.c.not_cited]).where((
-                                                                                 currency.c.currency == name_currency) & (
-                                                                                     currency.c.dttm >= old_data))
-    db = con.execute(table_currency)
+        [currency.c.dttm, currency.c.cited, currency.c.not_cited]).where((currency.c.currency == name_currency) & (
+                                                                                     currency.c.dttm >= dttm))
+    db = DB.con.execute(table_currency)
 
     for item in db:
         dest = item._row
@@ -438,7 +368,7 @@ def get_update_data(name_currency,dttm):
                 count = 0
                 coef = dest[1] / coef
                 break
-    old_data = dttm + datetime.timedelta(days=1)
+
     for k, n in d.items():
         if k >= dttm and k < dttm + datetime.timedelta(days=1) and dttm + datetime.timedelta(
                 days=1) < datetime.datetime.now():
@@ -450,16 +380,8 @@ def get_update_data(name_currency,dttm):
                 mean_d = sum * coef
                 sum = 0
                 count = 0
+                DB_postgres.insert(mean_d, name_currency, d_currency[k], k, on_currency)
 
-                insert = dict(
-                    currency=name_currency,
-                    not_cited=coef,
-                    cited=mean_d,
-                    dttm=k,
-                    on_currency=on_currency
-                )
-                cur_insert = currency.insert(insert)
-                con.execute(cur_insert)
                 dttm = dttm + datetime.timedelta(days=1)
 
 def get_7_days(name_currency):
@@ -477,8 +399,8 @@ def get_7_days(name_currency):
     d = get_d_btc.to_dict()
     table_currency = currency.select().with_only_columns([currency.c.dttm, currency.c.cited, currency.c.not_cited]).where((
         currency.c.currency == name_currency) & (currency.c.dttm>=old_data))
-    db = con.execute(table_currency)
-    result_db = {}
+    db = DB.con.execute(table_currency)
+
     for item in db:
         dest = item._row
     sum=0
@@ -508,24 +430,14 @@ def get_7_days(name_currency):
                     mean_d=sum*coef
                     sum = 0
                     count = 0
+                    DB_postgres.insert(mean_d, name_currency, d_currency[k], k, on_currency)
 
-
-                    insert = dict(
-                        currency=name_currency,
-                        not_cited=coef,
-                        cited=mean_d,
-                        dttm=k,
-                        on_currency=on_currency
-                    )
-                    cur_insert = currency.insert(insert)
-                    con.execute(cur_insert)
                     old_data = old_data + datetime.timedelta(days=1)
 
 def get_last_90days(name_currency, dttm):
     df1 = get_dataframe_from_db()
     pytrend = TrendReq()
-    df = get_dataframe_from_db()
-    to_list = df1.to_dict()
+
     on_currency=get_on_currency(name_currency)
     pytrend.build_payload(kw_list=[on_currency,name_currency], timeframe='today 3-m')
     interest_over_time_df = pytrend.interest_over_time()
@@ -535,13 +447,7 @@ def get_last_90days(name_currency, dttm):
     d_currency = get_currency.to_dict()
 
     d = get_d_btc.to_dict()
-    table_currency = currency.select().with_only_columns([currency.c.dttm, currency.c.cited]).where(
-        currency.c.currency == name_currency)
-    db = con.execute(table_currency)
-    result_db = {}
-    for item in db:
-        if item._row[0] == dttm:
-            result_db[item[0]] = item[1]
+    result_db=get_data_from_db(name_currency)
 
 
     for k, n in d.items():
@@ -553,18 +459,7 @@ def get_last_90days(name_currency, dttm):
     for k, n in d.items():
         if k >= dttm:
             mean_d = d_currency[k] * coef
-
-            insert = dict(
-                currency=name_currency,
-                not_cited=d_currency[k],
-                cited=mean_d,
-                dttm=k,
-                on_currency=on_currency
-            )
-            cur_insert = currency.insert(insert)
-            db = con.execute(cur_insert)
-
-
+            DB_postgres.insert(mean_d, name_currency, d_currency[k], k, on_currency)
 
 def get_7_days_btc():
     pytrend = TrendReq()
@@ -579,8 +474,8 @@ def get_7_days_btc():
     d = get_d_btc.to_dict()
     table_currency = currency.select().with_only_columns([currency.c.dttm, currency.c.cited, currency.c.not_cited]).where((
         currency.c.currency == 'bitcoin') & (currency.c.dttm>=old_data))
-    db = con.execute(table_currency)
-    result_db = {}
+    db = DB.con.execute(table_currency)
+
     for item in db:
         dest = item._row
     sum=0
@@ -611,16 +506,8 @@ def get_7_days_btc():
                     sum = 0
                     count = 0
 
+                    DB_postgres.insert(mean_d, 'bitcoin', coef, k, 'bitcoin')
 
-                    insert = dict(
-                        currency='bitcoin',
-                        not_cited=coef,
-                        cited=mean_d,
-                        dttm=k,
-                        on_currency='bitcoin'
-                    )
-                    cur_insert = currency.insert(insert)
-                    db = con.execute(cur_insert)
                     old_data = old_data + datetime.timedelta(days=1)
 
 def get_last_data(name_currency):
@@ -636,8 +523,6 @@ def get_last_data(name_currency):
     get_7_days(name_currency)
 
 
-
-
 def list_from_db(db):
     result=[]
     for item in db:
@@ -647,7 +532,7 @@ def list_from_db(db):
 def check_currency(name_currency):
     table_currency = currency.select().with_only_columns([currency.c.dttm, currency.c.cited]).where(
         currency.c.currency == name_currency)
-    db = con.execute(table_currency)
+    db = DB.con.execute(table_currency)
     if db.rowcount>0:
         return False
     else:

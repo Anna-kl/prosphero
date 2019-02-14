@@ -1,0 +1,3 @@
+host:185.230.142.61
+login:externalanna
+password:44iAipyAjHHxkwHgyAPrqPSR5
